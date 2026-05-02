@@ -15,6 +15,13 @@
 
 -- Write your query below:
 
+select first_name, 
+	   last_name, 
+	   city,
+	   phone 
+from  sales.customers
+where state = 'CA'
+	  and phone IS NOT NULL;
 
 
 
@@ -28,7 +35,12 @@
 
 -- Write your query below:
 
-
+SELECT product_id, 
+	   product_name, 
+	   model_year,
+	   list_price
+FROM production.products
+order by model_year DESC, list_price ASC;	
 
 
 -- ============================================================
@@ -41,10 +53,18 @@
 -- ============================================================
 
 -- Part a:
-
+select top 5 
+	product_name, 
+	list_price 
+from production.products
+order by list_price desc;
 
 -- Part b:
+--count is 321 and 5% of 321 is 16.05
 
+select TOP 5 PERCENT *
+from production.products
+order by list_price ASC;
 
 
 
@@ -59,15 +79,24 @@
 -- ============================================================
 
 -- Page 1:
-
+SELECT * FROM production.products
+order by list_price desc
+offset 0 rows
+fetch next 10 rows only;
 
 -- Page 2:
 
+SELECT * FROM production.products
+order by list_price desc
+offset 10 rows
+fetch next 10 rows only;
+
 
 -- Page 3:
-
-
-
+SELECT * FROM production.products
+order by list_price desc
+offset 20 rows
+fetch next 10 rows only;
 
 -- ============================================================
 --  Question 5 — DISTINCT
@@ -81,15 +110,15 @@
 -- ============================================================
 
 -- Part a:
-
-
+select distinct state from sales.customers
+order by state asc;
 -- Part b:
-
-
+select distinct state, city from sales.customers
+order by state asc, city asc;
 -- Part c:
-
-
-
+SELECT distinct model_year ,      'Model Year' description FROM production.products
+UNION
+SELECT count(distinct model_year),'Year count'   FROM production.products;
 
 -- ============================================================
 --  Question 6 — Logical Operators (AND / OR)
@@ -103,3 +132,9 @@
 -- ============================================================
 
 -- Write your query below:
+select product_id , product_name, brand_id, category_id, list_price
+from production.products
+where 
+list_price>=500 
+and list_price<=1500
+and (model_year=2019 OR model_year=2020)
