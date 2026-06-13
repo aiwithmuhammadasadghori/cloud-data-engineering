@@ -24,6 +24,14 @@
 -- This query is slow. Create an appropriate index to fix it.
 -- Then run the query to confirm it returns results correctly.
 
+CREATE NONCLUSTERED INDEX idx_products_brand_id
+ON production.products (brand_id)
+INCLUDE (product_name, list_price);
+
+-- Confirm it works
+SELECT product_id, product_name, list_price
+FROM production.products
+WHERE brand_id = 3;
 
 
 -- Q2.
@@ -36,6 +44,14 @@
 --
 -- Create an index to make this query more efficient.
 
+CREATE NONCLUSTERED INDEX idx_orders_order_date
+ON sales.orders (order_date)
+INCLUDE (customer_id);
+
+-- Confirm it works
+SELECT order_id, customer_id, order_date
+FROM sales.orders
+WHERE order_date BETWEEN '2018-01-01' AND '2018-06-30';
 
 
 -- ============================================================
@@ -51,6 +67,23 @@
 --   (not a number — use 1=Pending, 2=Processing).
 -- After creating it, query the view to see today's workload.
 
+CREATE VIEW sales.vw_pending_orders AS
+SELECT
+    o.order_id,
+    c.first_name + ' ' + c.last_name   AS customer_name,
+    c.phone,
+    c.email,
+    o.order_date,
+    CASE o.order_status
+        WHEN 1 THEN 'Pending'
+        WHEN 2 THEN 'Processing'
+    END                                 AS order_status
+FROM sales.orders o
+JOIN sales.customers c ON o.customer_id = c.customer_id
+WHERE o.order_status IN (1, 2);
+
+-- Query the view
+SELECT * FROM sales.vw_pending_orders;
 
 
 -- Q4.
@@ -61,6 +94,23 @@
 -- After creating it, query the view to find all products
 -- that have fewer than 3 units remaining in any store.
 
+CREATE VIEW sales.vw_stock_monitor AS
+SELECT
+    st.store_name,
+    p.product_name,
+    b.brand_name,
+    c.category_name,
+    s.quantity
+FROM production.stocks s
+JOIN sales.stores          st ON s.store_id    = st.store_id
+JOIN production.products   p  ON s.product_id  = p.product_id
+JOIN production.brands     b  ON p.brand_id    = b.brand_id
+JOIN production.categories c  ON p.category_id = c.category_id;
+
+-- Query the view — products with fewer than 3 units
+SELECT *
+FROM sales.vw_stock_monitor
+WHERE quantity < 3;
 
 
 -- ============================================================
@@ -73,6 +123,22 @@
 -- Show store_id, product_id, total_quantity, and their rank within the store.
 -- Return only rank 1 and rank 2 for each store.
 
+WITH store_product_sales AS (
+    SELECT
+        o.store_id,
+        oi.product_id,
+        SUM(oi.quantity)                                    AS total_quantity,
+        RANK() OVER (
+            PARTITION BY o.store_id
+            ORDER BY SUM(oi.quantity) DESC
+        )                                                   AS rnk
+    FROM sales.orders o
+    JOIN sales.order_items oi ON o.order_id = oi.order_id
+    GROUP BY o.store_id, oi.product_id
+)
+SELECT store_id, product_id, total_quantity, rnk
+FROM store_product_sales
+WHERE rnk <= 2;
 
 
 -- Q6.
@@ -82,6 +148,20 @@
 -- within the category.
 -- Return only the products ranked 2nd in their category.
 
+WITH price_ranked AS (
+    SELECT
+        category_id,
+        product_name,
+        list_price,
+        DENSE_RANK() OVER (
+            PARTITION BY category_id
+            ORDER BY list_price DESC
+        )           AS price_rank
+    FROM production.products
+)
+SELECT category_id, product_name, list_price, price_rank
+FROM price_ranked
+WHERE price_rank = 2;
 
 
 -- Q7.
@@ -90,28 +170,37 @@
 -- Write a query to identify the duplicate rows
 -- (same first_name, last_name, and phone).
 -- Return only the duplicates — not the original/first occurrence.
---
--- Run this setup first:
---
--- CREATE TABLE test_customers (
---     customer_id  INT,
---     first_name   VARCHAR(50),
---     last_name    VARCHAR(50),
---     phone        VARCHAR(20),
---     city         VARCHAR(50)
--- );
---
--- INSERT INTO test_customers VALUES
---     (1,  'Ali',    'Khan',    '0300-1111111', 'Karachi'),
---     (2,  'Sara',   'Ahmed',   '0321-2222222', 'Lahore'),
---     (3,  'Ali',    'Khan',    '0300-1111111', 'Karachi'),   -- duplicate of 1
---     (4,  'Usman',  'Malik',   '0333-3333333', 'Islamabad'),
---     (5,  'Sara',   'Ahmed',   '0321-2222222', 'Lahore'),   -- duplicate of 2
---     (6,  'Sara',   'Ahmed',   '0321-2222222', 'Lahore'),   -- 3rd copy of 2
---     (7,  'Hina',   'Raza',    '0312-4444444', 'Peshawar');
---
--- Now write your query to find the duplicate rows.
 
+CREATE TABLE test_customers (
+    customer_id  INT,
+    first_name   VARCHAR(50),
+    last_name    VARCHAR(50),
+    phone        VARCHAR(20),
+    city         VARCHAR(50)
+);
+
+INSERT INTO test_customers VALUES
+    (1,  'Ali',    'Khan',    '0300-1111111', 'Karachi'),
+    (2,  'Sara',   'Ahmed',   '0321-2222222', 'Lahore'),
+    (3,  'Ali',    'Khan',    '0300-1111111', 'Karachi'),
+    (4,  'Usman',  'Malik',   '0333-3333333', 'Islamabad'),
+    (5,  'Sara',   'Ahmed',   '0321-2222222', 'Lahore'),
+    (6,  'Sara',   'Ahmed',   '0321-2222222', 'Lahore'),
+    (7,  'Hina',   'Raza',    '0312-4444444', 'Peshawar');
+
+-- Find duplicates (row_number > 1 means it is a duplicate)
+WITH numbered AS (
+    SELECT
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY first_name, last_name, phone
+            ORDER BY customer_id
+        ) AS rn
+    FROM test_customers
+)
+SELECT customer_id, first_name, last_name, phone, city
+FROM numbered
+WHERE rn > 1;
 
 
 -- ============================================================
@@ -125,6 +214,22 @@
 -- Show month, net_sales, previous_month_sales, and the difference.
 -- Net sales = SUM( quantity * list_price * (1 - discount) )
 
+WITH monthly_sales AS (
+    SELECT
+        MONTH(o.order_date)                                       AS month,
+        SUM(oi.quantity * oi.list_price * (1 - oi.discount))     AS net_sales
+    FROM sales.orders o
+    JOIN sales.order_items oi ON o.order_id = oi.order_id
+    WHERE YEAR(o.order_date) = 2017
+    GROUP BY MONTH(o.order_date)
+)
+SELECT
+    month,
+    net_sales,
+    LAG(net_sales) OVER (ORDER BY month)                          AS previous_month_sales,
+    net_sales - LAG(net_sales) OVER (ORDER BY month)              AS difference
+FROM monthly_sales
+ORDER BY month;
 
 
 -- Q9.
@@ -134,6 +239,16 @@
 -- in the same category.
 -- Sort by category_id and list_price descending.
 
+SELECT
+    category_id,
+    product_name,
+    list_price,
+    LEAD(list_price) OVER (
+        PARTITION BY category_id
+        ORDER BY list_price DESC
+    )               AS next_lower_price
+FROM production.products
+ORDER BY category_id, list_price DESC;
 
 
 -- Q10.
@@ -144,6 +259,12 @@
 -- If both are missing, show 'No Contact Info'.
 -- Sort by last_name, first_name.
 
+SELECT
+    first_name + ' ' + last_name        AS full_name,
+    COALESCE(phone, email, 'No Contact Info') AS contact,
+    email
+FROM sales.customers
+ORDER BY last_name, first_name;
 
 
 -- ============================================================
